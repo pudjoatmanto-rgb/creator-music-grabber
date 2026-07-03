@@ -59,11 +59,15 @@ async function grabData(pageMode, pageCount, format, filename) {
       return;
     }
 
+    // Remove duplicates
+    const uniqueData = deduplicateData(allData);
+    console.log(`[CMG] Removed ${allData.length - uniqueData.length} duplicates. Final count: ${uniqueData.length}`);
+
     let fileContent;
     if (format === 'csv') {
-      fileContent = convertToCSV(allData);
+      fileContent = convertToCSV(uniqueData);
     } else {
-      fileContent = JSON.stringify(allData, null, 2);
+      fileContent = JSON.stringify(uniqueData, null, 2);
     }
 
     const extension = format === 'csv' ? 'csv' : 'json';
@@ -72,7 +76,7 @@ async function grabData(pageMode, pageCount, format, filename) {
     downloadFile(fileContent, fullFilename, format);
 
     sendMessage('grabComplete', {
-      message: `✅ Berhasil grab ${allData.length} lagu dari ${currentPage} halaman`
+      message: `✅ Berhasil grab ${uniqueData.length} lagu dari ${currentPage} halaman`
     });
     
   } catch (error) {
@@ -85,47 +89,97 @@ async function grabData(pageMode, pageCount, format, filename) {
 
 function extractCurrentPageData() {
   const tracks = [];
+  const seenTitles = new Set();
   
-  const trackRows = document.querySelectorAll('[class*="ytmus-entity-list-item-track"], [role="row"][class*="track"]');
-  console.log(`[CMG] Found ${trackRows.length} track elements on page`);
+  // More specific selector - look for individual track list items
+  const trackRows = document.querySelectorAll('div[jsname] [role="gridcell"] a, [data-track-id] a, [class*="track-item"] a');
+  console.log(`[CMG] Found ${trackRows.length} track link elements`);
 
-  trackRows.forEach((row, index) => {
+  // Get unique rows by going up to the parent row container
+  const uniqueRows = new Set();
+  trackRows.forEach(link => {
+    // Find the row container
+    let row = link.closest('[role="row"], [class*="track-item"], [class*="list-item"]');
+    if (!row) {
+      row = link.closest('div[jsname]');
+    }
+    if (row) {
+      uniqueRows.add(row);
+    }
+  });
+
+  console.log(`[CMG] Found ${uniqueRows.size} unique track rows`);
+
+  uniqueRows.forEach((row, index) => {
     try {
       let title = '';
       let artists = '';
       let youtubeLink = '';
 
-      const titleLink = row.querySelector('a[class*="title-link"], a[class*="title"][href]');
+      // Extract title - more specific
+      const titleLink = row.querySelector('a[href*="music.youtube"], a[jsname]');
       if (titleLink) {
-        title = titleLink.textContent.trim();
+        const titleText = titleLink.textContent.trim();
+        if (titleText && titleText.length > 0 && !titleText.startsWith('http')) {
+          title = titleText;
+        }
       }
 
-      const artistLinks = row.querySelectorAll('a[class*="artist-link"], a[href*="/channel/"], a[href*="/user/"]');
+      // If no title yet, try other selectors
+      if (!title) {
+        const allLinks = row.querySelectorAll('a');
+        for (let link of allLinks) {
+          const text = link.textContent.trim();
+          if (text && text.length > 0 && !text.startsWith('http') && !text.match(/^\d+:\d+/)) {
+            title = text;
+            break;
+          }
+        }
+      }
+
+      // Extract artists
+      const artistElements = row.querySelectorAll('a[href*="/channel/"], a[href*="/user/"], [class*="artist"]');
       const artistTexts = [];
-      artistLinks.forEach(link => {
-        const text = link.textContent.trim();
-        if (text && !text.includes('://') && text.length > 0 && !text.match(/^\d+/)) {
-          artistTexts.push(text);
+      artistElements.forEach(el => {
+        const text = el.textContent.trim();
+        if (text && !text.includes('://') && text.length > 0 && !text.match(/^\d+/) && text !== title) {
+          if (!artistTexts.includes(text)) {
+            artistTexts.push(text);
+          }
         }
       });
-      artists = artistTexts.join(', ') || 'Unknown';
+      artists = artistTexts.length > 0 ? artistTexts.join(', ') : 'Unknown';
 
+      // Extract YouTube link - look for various YouTube URL patterns
       const allLinks = row.querySelectorAll('a[href]');
       for (let link of allLinks) {
-        const href = link.getAttribute('href') || '';
-        if (href.includes('youtube.com') || href.includes('youtu.be')) {
-          youtubeLink = href.startsWith('http') ? href : 'https://youtube.com' + href;
+        let href = link.getAttribute('href') || '';
+        
+        // Handle relative URLs
+        if (href.startsWith('/')) {
+          href = 'https://music.youtube.com' + href;
+        }
+        
+        // Check if it's a YouTube URL
+        if (href.includes('youtube.com') || href.includes('youtu.be') || href.includes('music.youtube.com')) {
+          if (href.startsWith('http')) {
+            youtubeLink = href;
+          } else {
+            youtubeLink = 'https://youtube.com' + href;
+          }
           break;
         }
       }
 
-      if (title && title.length > 0) {
+      // Only add if we have a title and haven't seen it before
+      if (title && title.length > 0 && !seenTitles.has(title)) {
+        seenTitles.add(title);
         tracks.push({
           title: title,
           artist: artists,
-          youtubeLink: youtubeLink || 'Link not found'
+          youtubeLink: youtubeLink || ''
         });
-        console.log(`[CMG] Track ${index + 1}: ${title} - ${artists}`);
+        console.log(`[CMG] Track ${index + 1}: ${title} - ${artists} - ${youtubeLink ? 'Link found' : 'No link'}`);
       }
     } catch (error) {
       console.error('[CMG] Error extracting track:', error);
@@ -135,25 +189,42 @@ function extractCurrentPageData() {
   return tracks;
 }
 
+function deduplicateData(data) {
+  const seen = new Map();
+  const unique = [];
+
+  data.forEach(track => {
+    const key = `${track.title}|${track.artist}`;
+    if (!seen.has(key)) {
+      seen.set(key, true);
+      unique.push(track);
+    }
+  });
+
+  return unique;
+}
+
 async function scrollAndLoadMore() {
   try {
-    const scrollContainer = document.querySelector('[role="main"], [class*="content-container"], [class*="search-results-container"]');
+    const scrollContainer = document.querySelector('[role="main"], [class*="content"], [class*="results"]');
     
     if (scrollContainer) {
-      const currentScroll = scrollContainer.scrollTop;
+      const currentHeight = scrollContainer.scrollHeight;
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
       
       console.log('[CMG] Scrolling to load more content...');
       
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      if (scrollContainer.scrollHeight > currentScroll) {
+      const newHeight = scrollContainer.scrollHeight;
+      if (newHeight > currentHeight) {
+        console.log('[CMG] New content loaded');
         return true;
       }
     }
 
     const nextButtons = document.querySelectorAll(
-      'button[aria-label*="Next"], button[title*="Next"], [class*="next-page"] button, button[aria-label*="next"]'
+      'button[aria-label*="Next"], button[title*="Next"], [class*="next"] button'
     );
     
     for (let btn of nextButtons) {
