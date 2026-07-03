@@ -1,1 +1,104 @@
-document.addEventListener('DOMContentLoaded', () => {\n  const pagesRadios = document.querySelectorAll('input[name=\"pages\"]');\n  const customPagesSection = document.getElementById('custom-pages-section');\n  const grabBtn = document.getElementById('grab-btn');\n  const cancelBtn = document.getElementById('cancel-btn');\n  const statusDiv = document.getElementById('status');\n  const progressDiv = document.getElementById('progress');\n  const progressFill = document.getElementById('progress-fill');\n  const progressText = document.getElementById('progress-text');\n\n  // Toggle custom pages input\n  pagesRadios.forEach(radio => {\n    radio.addEventListener('change', () => {\n      customPagesSection.style.display = radio.value === 'custom' ? 'block' : 'none';\n    });\n  });\n\n  // Start grabbing\n  grabBtn.addEventListener('click', () => {\n    const pagesValue = document.querySelector('input[name=\"pages\"]:checked').value;\n    const filename = document.getElementById('filename').value.trim();\n    const format = document.getElementById('format').value;\n    const pageCount = parseInt(document.getElementById('page-count').value) || 1;\n\n    if (!filename) {\n      showStatus('Nama file tidak boleh kosong', 'error');\n      return;\n    }\n\n    grabBtn.disabled = true;\n    cancelBtn.style.display = 'block';\n    progressDiv.style.display = 'block';\n    showStatus('Menghubungkan ke halaman...', 'info');\n\n    // Send message with Promise wrapper\n    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {\n      if (!tabs || tabs.length === 0) {\n        showStatus('❌ Error: Tidak ada tab aktif', 'error');\n        resetUI();\n        return;\n      }\n\n      try {\n        chrome.tabs.sendMessage(tabs[0].id, {\n          action: 'grabData',\n          pageMode: pagesValue,\n          pageCount: pageCount,\n          format: format,\n          filename: filename\n        });\n        console.log('[CMG Popup] Message sent to content script');\n      } catch (err) {\n        console.error('[CMG Popup] Error sending message:', err);\n        showStatus('❌ Error: Tidak bisa menghubungi halaman', 'error');\n        resetUI();\n      }\n    });\n  });\n\n  // Cancel grabbing\n  cancelBtn.addEventListener('click', () => {\n    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {\n      if (tabs && tabs[0]) {\n        try {\n          chrome.tabs.sendMessage(tabs[0].id, { action: 'stopGrab' });\n        } catch (err) {\n          console.error('[CMG Popup] Error stopping grab:', err);\n        }\n      }\n    });\n    resetUI();\n    showStatus('⏸️ Dibatalkan', 'warning');\n  });\n\n  // Listen for messages from content script\n  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {\n    console.log('[CMG Popup] Message received:', request.action);\n    \n    if (request.action === 'updateProgress') {\n      const percent = Math.min(request.progress || 0, 99);\n      progressFill.style.width = percent + '%';\n      progressText.textContent = request.message || '';\n    } else if (request.action === 'grabComplete') {\n      progressFill.style.width = '100%';\n      resetUI();\n      showStatus(request.message || '✅ Selesai', 'success');\n    } else if (request.action === 'grabError') {\n      resetUI();\n      showStatus('❌ ' + (request.message || 'Terjadi error'), 'error');\n    }\n  });\n\n  function showStatus(message, type) {\n    statusDiv.textContent = message;\n    statusDiv.className = 'status ' + type;\n  }\n\n  function resetUI() {\n    grabBtn.disabled = false;\n    cancelBtn.style.display = 'none';\n    progressDiv.style.display = 'none';\n    progressFill.style.width = '0%';\n    progressText.textContent = '';\n  }\n});\n
+document.addEventListener('DOMContentLoaded', () => {
+  const pagesRadios = document.querySelectorAll('input[name="pages"]');
+  const customPagesSection = document.getElementById('custom-pages-section');
+  const grabBtn = document.getElementById('grab-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
+  const statusDiv = document.getElementById('status');
+  const progressDiv = document.getElementById('progress');
+  const progressFill = document.getElementById('progress-fill');
+  const progressText = document.getElementById('progress-text');
+
+  // Toggle custom pages input
+  pagesRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      customPagesSection.style.display = radio.value === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  // Start grabbing
+  grabBtn.addEventListener('click', () => {
+    const pagesValue = document.querySelector('input[name="pages"]:checked').value;
+    const filename = document.getElementById('filename').value.trim();
+    const format = document.getElementById('format').value;
+    const pageCount = parseInt(document.getElementById('page-count').value) || 1;
+
+    if (!filename) {
+      showStatus('Nama file tidak boleh kosong', 'error');
+      return;
+    }
+
+    grabBtn.disabled = true;
+    cancelBtn.style.display = 'block';
+    progressDiv.style.display = 'block';
+    showStatus('Menghubungkan ke halaman...', 'info');
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs || tabs.length === 0) {
+        showStatus('Error: Tidak ada tab aktif', 'error');
+        resetUI();
+        return;
+      }
+
+      try {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'grabData',
+          pageMode: pagesValue,
+          pageCount: pageCount,
+          format: format,
+          filename: filename
+        });
+        console.log('[CMG Popup] Message sent to content script');
+      } catch (err) {
+        console.error('[CMG Popup] Error sending message:', err);
+        showStatus('Error: Tidak bisa menghubungi halaman', 'error');
+        resetUI();
+      }
+    });
+  });
+
+  // Cancel grabbing
+  cancelBtn.addEventListener('click', () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0]) {
+        try {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'stopGrab' });
+        } catch (err) {
+          console.error('[CMG Popup] Error stopping grab:', err);
+        }
+      }
+    });
+    resetUI();
+    showStatus('Dibatalkan', 'warning');
+  });
+
+  // Listen for messages from content script
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('[CMG Popup] Message received:', request.action);
+
+    if (request.action === 'updateProgress') {
+      const percent = Math.min(request.progress || 0, 99);
+      progressFill.style.width = percent + '%';
+      progressText.textContent = request.message || '';
+    } else if (request.action === 'grabComplete') {
+      progressFill.style.width = '100%';
+      resetUI();
+      showStatus(request.message || 'Selesai', 'success');
+    } else if (request.action === 'grabError') {
+      resetUI();
+      showStatus('Error: ' + (request.message || 'Terjadi error'), 'error');
+    }
+  });
+
+  function showStatus(message, type) {
+    statusDiv.textContent = message;
+    statusDiv.className = 'status ' + type;
+  }
+
+  function resetUI() {
+    grabBtn.disabled = false;
+    cancelBtn.style.display = 'none';
+    progressDiv.style.display = 'none';
+    progressFill.style.width = '0%';
+    progressText.textContent = '';
+  }
+});
