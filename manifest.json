@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Creator Music Grabber",
+  "version": "1.0.1",
+  "description": "Grab music data from YouTube Creator Music (Beta)",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "tabs",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://studio.youtube.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://studio.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Creator Music Grabber"
+  }
+}
