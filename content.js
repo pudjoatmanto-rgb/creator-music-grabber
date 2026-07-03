@@ -22,10 +22,8 @@ async function grabData(pageMode, pageCount, format, filename) {
     while (currentPage <= maxPages && isGrabbing) {
       console.log(`[CMG] Processing page ${currentPage}...`);
       
-      // Wait for content to load
       await new Promise(resolve => setTimeout(resolve, 800));
       
-      // Get current page data
       const pageData = extractCurrentPageData();
       console.log(`[CMG] Page ${currentPage}: Found ${pageData.length} tracks`);
       allData = allData.concat(pageData);
@@ -36,13 +34,11 @@ async function grabData(pageMode, pageCount, format, filename) {
         message: `Halaman ${currentPage}: ${pageData.length} lagu | Total: ${allData.length} lagu`
       });
 
-      // Check if we should continue
       if (currentPage >= maxPages) {
         console.log('[CMG] Reached maximum pages');
         break;
       }
 
-      // Try to load next page
       if (pageMode === 'all' || currentPage < maxPages) {
         const hasNextPage = await scrollAndLoadMore();
         if (!hasNextPage) {
@@ -63,7 +59,6 @@ async function grabData(pageMode, pageCount, format, filename) {
       return;
     }
 
-    // Convert to desired format
     let fileContent;
     if (format === 'csv') {
       fileContent = convertToCSV(allData);
@@ -72,7 +67,9 @@ async function grabData(pageMode, pageCount, format, filename) {
     }
 
     const extension = format === 'csv' ? 'csv' : 'json';
-    downloadFile(fileContent, `${filename}.${extension}`, format);
+    const fullFilename = `${filename}.${extension}`;
+    
+    downloadFile(fileContent, fullFilename, format);
 
     sendMessage('grabComplete', {
       message: `✅ Berhasil grab ${allData.length} lagu dari ${currentPage} halaman`
@@ -89,7 +86,6 @@ async function grabData(pageMode, pageCount, format, filename) {
 function extractCurrentPageData() {
   const tracks = [];
   
-  // Get all track rows - looking for the container with track data
   const trackRows = document.querySelectorAll('[class*="ytmus-entity-list-item-track"], [role="row"][class*="track"]');
   console.log(`[CMG] Found ${trackRows.length} track elements on page`);
 
@@ -99,25 +95,21 @@ function extractCurrentPageData() {
       let artists = '';
       let youtubeLink = '';
 
-      // Extract title - look for the main title link
       const titleLink = row.querySelector('a[class*="title-link"], a[class*="title"][href]');
       if (titleLink) {
         title = titleLink.textContent.trim();
       }
 
-      // Extract artists - look for artist links
       const artistLinks = row.querySelectorAll('a[class*="artist-link"], a[href*="/channel/"], a[href*="/user/"]');
       const artistTexts = [];
       artistLinks.forEach(link => {
         const text = link.textContent.trim();
-        // Filter out non-artist text
-        if (text && !text.includes('://') && text.length > 0 && !text.match(/^\d+/)  ) {
+        if (text && !text.includes('://') && text.length > 0 && !text.match(/^\d+/)) {
           artistTexts.push(text);
         }
       });
       artists = artistTexts.join(', ') || 'Unknown';
 
-      // Extract YouTube link - look for any YouTube URL
       const allLinks = row.querySelectorAll('a[href]');
       for (let link of allLinks) {
         const href = link.getAttribute('href') || '';
@@ -127,7 +119,6 @@ function extractCurrentPageData() {
         }
       }
 
-      // Only add if we have at least a title
       if (title && title.length > 0) {
         tracks.push({
           title: title,
@@ -146,26 +137,21 @@ function extractCurrentPageData() {
 
 async function scrollAndLoadMore() {
   try {
-    // Find the scrollable container
     const scrollContainer = document.querySelector('[role="main"], [class*="content-container"], [class*="search-results-container"]');
     
     if (scrollContainer) {
-      // Scroll to bottom to trigger lazy loading
       const currentScroll = scrollContainer.scrollTop;
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
       
       console.log('[CMG] Scrolling to load more content...');
       
-      // Wait for new content to load
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Check if new content was loaded by comparing heights
       if (scrollContainer.scrollHeight > currentScroll) {
         return true;
       }
     }
 
-    // Try to find and click next page button
     const nextButtons = document.querySelectorAll(
       'button[aria-label*="Next"], button[title*="Next"], [class*="next-page"] button, button[aria-label*="next"]'
     );
@@ -217,15 +203,21 @@ function downloadFile(content, filename, mimeType) {
     const mime = mimeTypes[mimeType] || 'text/plain;charset=utf-8;';
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 100);
 
-    // Use chrome.downloads API
-    chrome.downloads.download({
-      url: url,
-      filename: filename,
-      saveAs: true
-    });
-
-    console.log('[CMG] Download initiated:', filename);
+    console.log('[CMG] File download initiated:', filename);
   } catch (error) {
     console.error('[CMG] Download error:', error);
     throw new Error('Gagal mendownload file: ' + error.message);
